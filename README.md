@@ -55,7 +55,7 @@ python ftpcmd.py --get --local /path/to/save/directory --remote /remote/path/
 |------|------|--------|
 | `--put` | 上传模式 | - |
 | `--get` | 下载模式 | - |
-| `--local` | 本地文件/目录路径 | (必填) |
+| `--local` | 本地文件/目录路径（下载时可省略） | (上传时必填) |
 | `--remote` | 远程文件/目录路径 | `/版本发布区-Manual/clamav_db` |
 | `--host` | FTP服务器地址 | `192.168.2.250` |
 | `--user` | FTP用户名 | `51` |
@@ -66,6 +66,12 @@ python ftpcmd.py --get --local /path/to/save/directory --remote /remote/path/
 
 ### 递归深度限制
 工具内置了递归深度限制机制（默认50层），防止在处理无限嵌套目录时出现卡死问题。当达到最大递归深度时，工具会安全停止并显示警告信息。
+
+### 灵活的参数处理
+工具支持更灵活的参数组合：
+- **上传时**：允许 `--remote` 参数为空，文件将自动上传到默认FTP路径
+- **下载时**：允许 `--local` 参数为空，文件将自动保存到当前目录
+- **智能文件名**：自动使用远程文件名或目录名作为默认名称
 
 ### 实际目录结构处理
 工具能够正确处理包含文件的嵌套目录结构，例如：
@@ -129,6 +135,19 @@ python ftpcmd.py --put --local backup.tar.gz --remote /backups/ --host 10.0.0.10
 - 文件不存在时会提示并退出
 - 权限不足时会显示FTP错误代码
 - 网络中断时会保持已传输的数据
+
+## 开发测试
+
+项目包含多个测试脚本：
+- `test_mixed_structure.py`: 测试混合目录结构处理
+- `test_args.py`: 测试命令行参数处理
+- `test_actual_structure`: 实际目录结构测试
+
+运行测试：
+```bash
+python3 test_mixed_structure.py
+python3 test_args.py
+```
 
 ## 开发说明
 

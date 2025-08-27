@@ -383,7 +383,7 @@ def main():
     parser = argparse.ArgumentParser(description='FTP文件传输工具')
     parser.add_argument('--put', action='store_true', help='上传文件/目录到FTP服务器')
     parser.add_argument('--get', action='store_true', help='从FTP服务器下载文件/目录')
-    parser.add_argument('--local', required=True, help='本地文件/目录路径')
+    parser.add_argument('--local', help='本地文件/目录路径（下载时可省略，默认为当前目录）')
     parser.add_argument('--remote', help='远程文件/目录路径（默认为FTP_PATH）')
     parser.add_argument('--host', default=FTP_HOST, help=f'FTP服务器地址（默认: {FTP_HOST}）')
     parser.add_argument('--user', default=FTP_USER, help=f'FTP用户名（默认: {FTP_USER}）')
@@ -443,7 +443,11 @@ def main():
                 print("错误: 下载操作必须指定 --remote 参数")
                 sys.exit(1)
             
-            local_path = Path(args.local)
+            # 处理本地路径：如果未指定则使用当前目录
+            if args.local:
+                local_path = Path(args.local)
+            else:
+                local_path = Path(".")
             
             # 检查远程路径是文件还是目录
             try:
@@ -454,11 +458,19 @@ def main():
                 is_file = False
             
             if is_file:
-                # 下载单个文件
-                success = ftp_client.download_file(remote_path, args.local)
+                # 下载单个文件：如果未指定本地路径，使用远程文件名
+                if args.local:
+                    local_file = args.local
+                else:
+                    local_file = os.path.basename(remote_path)
+                success = ftp_client.download_file(remote_path, local_file)
             else:
-                # 下载整个目录
-                success = ftp_client.download_directory(remote_path, args.local)
+                # 下载整个目录：如果未指定本地路径，使用远程目录名
+                if args.local:
+                    local_dir = args.local
+                else:
+                    local_dir = os.path.basename(remote_path) or "downloaded"
+                success = ftp_client.download_directory(remote_path, local_dir)
         
         sys.exit(0 if success else 1)
         
