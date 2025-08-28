@@ -153,6 +153,65 @@ class FTPClient:
             print(f"\n文件上传失败: {e}")
             return False
     
+    def list_directory(self, remote_dir: str = '/') -> bool:
+        """
+        列出FTP服务器指定目录的内容
+        
+        Args:
+            remote_dir: 远程目录路径，默认为根目录
+            
+        Returns:
+            bool: 列表操作是否成功
+        """
+        try:
+            # 切换到指定目录
+            self.ftp.cwd(remote_dir)
+            
+            # 获取文件列表
+            items = []
+            self.ftp.retrlines('LIST', items.append)
+            
+            if not items:
+                print(f"目录 '{remote_dir}' 为空")
+                return True
+            
+            print(f"目录 '{remote_dir}' 的内容:")
+            print("-" * 80)
+            
+            for item in items:
+                # 解析目录列表项
+                parts = item.split()
+                if len(parts) < 3:
+                    continue
+                
+                # 检查权限字符串的第一个字符来判断文件类型
+                is_dir = parts[0].startswith('d') if parts[0] else False
+                
+                # 文件大小（第5个部分）
+                file_size = parts[4] if len(parts) >= 5 else "-"
+                
+                # 修改时间（月(6) 日(7) 时间/年(8)）
+                time_parts = parts[5:8] if len(parts) >= 8 else []
+                mod_time = ' '.join(time_parts) if time_parts else "-"
+                
+                # 文件名（从第8个部分开始）
+                filename = ' '.join(parts[8:]) if len(parts) >= 9 else parts[-1]
+                
+                # 跳过特殊目录
+                if filename in ['.', '..']:
+                    continue
+                
+                # 显示文件信息
+                file_type = "DIR" if is_dir else "FILE"
+                print(f"{file_type:4} {file_size:>10} {mod_time:12} {filename}")
+            
+            print("-" * 80)
+            return True
+            
+        except Exception as e:
+            print(f"列出目录失败: {e}")
+            return False
+
     def download_file(self, remote_file: str, local_file: str) -> bool:
         """
         从FTP服务器下载单个文件，支持断点续传
@@ -377,12 +436,13 @@ def main():
     FTP_HOST = '192.168.2.250'
     FTP_USER = '51'
     FTP_PASS = '51'
-    FTP_PATH = '/版本发布区-Manual/clamav_db'
+    FTP_PATH = '/文件中转区/恶意程序现网分析/20250828'
     FTP_ENCODING = 'gbk'
     
     parser = argparse.ArgumentParser(description='FTP文件传输工具')
     parser.add_argument('--put', action='store_true', help='上传文件/目录到FTP服务器')
     parser.add_argument('--get', action='store_true', help='从FTP服务器下载文件/目录')
+    parser.add_argument('--ls', action='store_true', help='列出FTP服务器文件列表')
     parser.add_argument('--local', help='本地文件/目录路径（下载时可省略，默认为当前目录）')
     parser.add_argument('--remote', help='远程文件/目录路径（默认为FTP_PATH）')
     parser.add_argument('--host', default=FTP_HOST, help=f'FTP服务器地址（默认: {FTP_HOST}）')
@@ -393,13 +453,15 @@ def main():
     args = parser.parse_args()
     
     # 验证参数
-    if not (args.put or args.get):
-        print("错误: 必须指定 --put 或 --get 参数")
+    if not (args.put or args.get or args.ls):
+        print("错误: 必须指定 --put、--get 或 --ls 参数")
         parser.print_help()
         sys.exit(1)
     
-    if args.put and args.get:
-        print("错误: --put 和 --get 参数不能同时使用")
+    # 检查参数冲突
+    action_count = sum([args.put, args.get, args.ls])
+    if action_count > 1:
+        print("错误: --put、--get 和 --ls 参数不能同时使用")
         sys.exit(1)
     
     # 设置远程路径
@@ -418,8 +480,11 @@ def main():
         if not ftp_client.connect():
             sys.exit(1)
         
-        # 执行上传或下载操作
-        if args.put:
+        # 执行上传、下载或列表操作
+        if args.ls:
+            # 列出目录内容
+            success = ftp_client.list_directory(remote_path)
+        elif args.put:
             local_path = Path(args.local)
             if local_path.is_file():
                 # 上传单个文件
