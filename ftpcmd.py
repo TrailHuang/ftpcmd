@@ -615,8 +615,13 @@ def main():
                             remote_file = os.path.join(remote_dir, local_path.name).replace('\\', '/')
                             success = ftp_client.upload_file(args.local, remote_file)
                     else:
-                        # 直接使用指定的远程路径（重命名文件）
-                        success = ftp_client.upload_file(args.local, remote_path)
+                        # 如果远程路径是目录路径（以/结尾），则使用本地文件名
+                        if remote_path == FTP_PATH or remote_path.endswith('/'):
+                            remote_file = os.path.join(remote_path, local_path.name).replace('\\', '/')
+                            success = ftp_client.upload_file(args.local, remote_file)
+                        else:
+                            # 直接使用指定的远程路径（重命名文件）
+                            success = ftp_client.upload_file(args.local, remote_path)
                 elif local_path.is_dir():
                     # 如果远程路径以/结尾，表示要在该目录下创建子目录
                     if remote_path.endswith('/'):
