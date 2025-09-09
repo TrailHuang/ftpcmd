@@ -12,13 +12,20 @@
 - ✅ 支持中文路径和文件名
 - ✅ 可配置的连接参数
 - ✅ 递归深度限制（防止无限递归卡死）
-- ✅ 支持目录递归查找（显示所有子目录和文件）
 - ✅ 支持树状结构目录显示（--tree命令）
 
 ## 安装要求
 
 - Python 3.6+
 - 无需额外依赖（使用标准库ftplib）
+
+### Python版本兼容性
+工具支持Python 3.6及以上版本，并自动处理不同Python版本的FTP连接编码兼容性：
+
+- **Python 3.9+**: 原生支持FTP连接的encoding参数
+- **Python 3.8及以下**: 使用兼容性方案，手动设置FTP连接编码
+
+所有版本都支持中文路径和文件名处理。
 
 ## 使用方法
 
@@ -32,23 +39,23 @@ python ftpcmd.py [选项] --put/--get/--ls/--tree/--find --local <本地路径> 
 
 ```bash
 # 上传单个文件
-python ftpcmd.py --put --local /path/to/local/file.txt --remote /remote/path/file.txt
+python ftpcmd.py --put /path/to/local/file.txt [--remote /remote/path/file.txt]
 
 # 上传整个目录
-python ftpcmd.py --put --local /path/to/local/directory --remote /remote/path/
+python ftpcmd.py --put  /path/to/local/directory [--remote /remote/path/]
 
 # 使用自定义FTP配置
-python ftpcmd.py --put --local file.txt --remote /upload/file.txt --host 192.168.1.100 --user username --pass password
+python ftpcmd.py --put  file.txt [--remote /upload/file.txt --host 192.168.1.100 --user username --pass password]
 ```
 
 ### 下载文件/目录
 
 ```bash
 # 下载单个文件
-python ftpcmd.py --get --local /path/to/save/file.txt --remote /remote/path/file.txt
+python ftpcmd.py --get  /remote/path/file.txt [--local /path/to/save/file.txt ]
 
 # 下载整个目录
-python ftpcmd.py --get --local /path/to/save/directory --remote /remote/path/
+python ftpcmd.py --get /remote/path/ [--local /path/to/save/directory ]
 ```
 
 ### 查看目录结构
@@ -60,11 +67,6 @@ python ftpcmd.py --ls --remote /remote/path/
 # 以树状结构显示目录内容
 python ftpcmd.py --tree --remote /remote/path/
 
-# 递归查找目录下的所有子目录和文件
-python ftpcmd.py --find --remote /remote/path/
-
-# 示例：查找特定目录结构
-python ftpcmd.py --find --remote /文件中转区/恶意程序现网分析/20250828
 ```
 
 ### 所有选项说明
@@ -177,42 +179,22 @@ FTP_ENCODING = 'gbk'          # 连接编码
 ### 示例1：上传病毒库文件
 
 ```bash
-python ftpcmd.py --put --local /data/clamav/daily.cvd --remote /版本发布区-Manual/clamav_db/
+python ftpcmd.py --put  /data/clamav/daily.cvd --remote /版本发布区-Manual/clamav_db/
 ```
 
 ### 示例2：下载整个发布目录
 
 ```bash
-python ftpcmd.py --get --local ./downloads --remote /版本发布区-Manual/clamav_db/
+python ftpcmd.py --get  /版本发布区-Manual/clamav_db/ --local ./downloads
 ```
 
 ### 示例3：使用自定义服务器
 
 ```bash
-python ftpcmd.py --put --local backup.tar.gz --remote /backups/ --host 10.0.0.100 --user admin --pass secret123
+python ftpcmd.py --put  backup.tar.gz --remote /backups/ --host 10.0.0.100 --user admin --pass secret123
 ```
 
-### 示例4：递归查找目录结构
-
-```bash
-# 查找整个目录树
-python ftpcmd.py --find --remote /文件中转区/
-
-# 查找特定日期目录
-python ftpcmd.py --find --remote /文件中转区/恶意程序现网分析/20250828/
-
-# 输出示例：
-# /文件中转区/恶意程序现网分析/20250828/
-# > /文件中转区/恶意程序现网分析/20250828/样包/
-# >> /文件中转区/恶意程序现网分析/20250828/样包/内蒙古移动/
-# >> /文件中转区/恶意程序现网分析/20250828/样包/安徽电信/
-#   📄 example_file.txt
-# >> /文件中转区/恶意程序现网分析/20250828/样包/江苏移动/
-# >> /文件中转区/恶意程序现网分析/20250828/样包/重庆电信/
-#   📄 kaohe_5g_20250828162319.zip
-```
-
-### 示例5：树状结构显示目录
+### 示例4：树状结构显示目录
 
 ```bash
 # 显示整个目录树结构
@@ -242,19 +224,6 @@ python ftpcmd.py --tree --remote /文件中转区/恶意程序现网分析/20250
 - 网络中断时会保持已传输的数据
 
 ## 开发测试
-
-项目包含多个测试脚本：
-- `test_mixed_structure.py`: 测试混合目录结构处理
-- `test_args.py`: 测试命令行参数处理
-- `test_actual_structure`: 实际目录结构测试
-- `test_tree_function.py`: 测试树状结构显示功能
-
-运行测试：
-```bash
-python3 test_mixed_structure.py
-python3 test_args.py
-python3 test_tree_function.py
-```
 
 ## 开发说明
 
