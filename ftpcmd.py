@@ -5,6 +5,9 @@ FTP文件传输工具
 支持文件/目录的上传与下载，支持断点续传和实时进度反馈
 """
 
+# 版本号
+VERSION = "1.0.0"
+
 import os
 import sys
 import argparse
@@ -502,23 +505,29 @@ def main():
     FTP_ENCODING = config.get('FTP_ENCODING', 'gbk') if config else 'gbk'
     
     parser = argparse.ArgumentParser(description='FTP文件传输工具')
-    parser.add_argument('--put', nargs='?', const=True, help='上传文件/目录到FTP服务器，后接本地路径')
-    parser.add_argument('--get', nargs='?', const=True, help='从FTP服务器下载文件/目录，后接远程路径')
+    parser.add_argument('-p','--put', nargs='?', const=True, help='上传文件/目录到FTP服务器，后接本地路径')
+    parser.add_argument('-g','--get', nargs='?', const=True, help='从FTP服务器下载文件/目录，后接远程路径')
     parser.add_argument('--ls', action='store_true', help='列出FTP服务器文件列表')
     parser.add_argument('--tree', action='store_true', help='以树状结构显示FTP服务器目录')
-    parser.add_argument('--local', help='本地文件/目录路径（下载时可省略，默认为当前目录）')
-    parser.add_argument('--remote', help='远程文件/目录路径（默认为FTP_PATH）')
+    parser.add_argument('-l', '--local', help='本地文件/目录路径（下载时可省略，默认为当前目录）')
+    parser.add_argument('-r', '--remote', help='远程文件/目录路径（默认为FTP_PATH）')
     parser.add_argument('--host', default=FTP_HOST, help=f'FTP服务器地址（默认: {FTP_HOST}）')
     parser.add_argument('--user', default=FTP_USER, help=f'FTP用户名（默认: {FTP_USER}）')
     parser.add_argument('--pass', dest='password', default=FTP_PASS, help=f'FTP密码（默认: {FTP_PASS}）')
     parser.add_argument('--encoding', default=FTP_ENCODING, help=f'FTP连接编码（默认: {FTP_ENCODING}）')
+    parser.add_argument('-v', '--version', action='store_true', help='显示版本信息')
     
     args = parser.parse_args()
+    
+    # 处理版本显示
+    if args.version:
+        print(f"FTP文件传输工具 v{VERSION}")
+        sys.exit(0)
     
     # 检查是否有操作参数
     has_action = bool(args.put or args.get or args.ls or args.tree)
     if not has_action:
-        print("错误: 必须指定 --put、--get、--ls 或 --tree 参数")
+        print("错误: 必须指定 --put、--get、--ls、--tree 或 --version 参数")
         parser.print_help()
         sys.exit(1)
     
