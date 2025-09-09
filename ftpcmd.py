@@ -43,7 +43,16 @@ class FTPClient:
             bool: 连接是否成功
         """
         try:
-            self.ftp = ftplib.FTP(self.host, encoding=self.encoding)
+            # 兼容不同Python版本的FTP连接方式
+            try:
+                # Python 3.9+ 支持encoding参数
+                self.ftp = ftplib.FTP(self.host, encoding=self.encoding)
+            except TypeError:
+                # Python 3.8及以下版本不支持encoding参数
+                self.ftp = ftplib.FTP(self.host)
+                # 手动设置编码
+                self.ftp.encoding = self.encoding
+            
             self.ftp.login(self.username, self.password)
             self.connected = True
             print(f"成功连接到FTP服务器: {self.host}")
