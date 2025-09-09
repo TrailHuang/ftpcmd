@@ -234,8 +234,25 @@ class FTPClient:
                         mode = 'wb'
                         start_pos = 0
                 else:
-                    print(f"本地路径不是文件: {local_file}")
-                    return False
+                    # 如果本地路径是目录，则将文件下载到该目录中
+                    local_file = os.path.join(local_file, os.path.basename(remote_file))
+                    local_path = Path(local_file)
+                    if local_path.exists() and local_path.is_file():
+                        local_size = local_path.stat().st_size
+                        if local_size == remote_size:
+                            print(f"文件已存在且完整: {local_file}")
+                            return True
+                        elif local_size < remote_size:
+                            print(f"发现未完成的下载，继续从 {local_size} 字节处下载")
+                            mode = 'ab'
+                            start_pos = local_size
+                        else:
+                            print(f"本地文件异常，重新下载")
+                            mode = 'wb'
+                            start_pos = 0
+                    else:
+                        mode = 'wb'
+                        start_pos = 0
             else:
                 mode = 'wb'
                 start_pos = 0
@@ -509,8 +526,8 @@ def main():
     parser.add_argument('-g','--get', nargs='?', const=True, help='从FTP服务器下载文件/目录，后接远程路径')
     parser.add_argument('--ls', action='store_true', help='列出FTP服务器文件列表')
     parser.add_argument('--tree', action='store_true', help='以树状结构显示FTP服务器目录')
-    parser.add_argument('-l', '--local', help='本地文件/目录路径（下载时可省略，默认为当前目录）')
-    parser.add_argument('-r', '--remote', help='远程文件/目录路径（默认为FTP_PATH）')
+    parser.add_argument('-l', '--local', help='本地文件/目录路径')
+    parser.add_argument('-r', '--remote', help='远程文件/目录路径')
     parser.add_argument('--host', default=FTP_HOST, help=f'FTP服务器地址（默认: {FTP_HOST}）')
     parser.add_argument('--user', default=FTP_USER, help=f'FTP用户名（默认: {FTP_USER}）')
     parser.add_argument('--pass', dest='password', default=FTP_PASS, help=f'FTP密码（默认: {FTP_PASS}）')
@@ -537,9 +554,22 @@ def main():
         print("错误: --put、--get、--ls 和 --tree 参数不能同时使用")
         sys.exit(1)
     
+    # 检查参数组合冲突
+    if args.put and args.local:
+        print("错误: --put 命令不需要使用 --local 参数")
+        sys.exit(1)
+    
+    if args.get and args.remote:
+        print("错误: --get 命令不需要使用 --remote 参数")
+        sys.exit(1)
+    
     # 处理远程路径
     if args.remote:
-        remote_path = os.path.join(FTP_PATH, args.remote).replace('\\', '/')
+        # 如果远程路径已经是绝对路径（以/开头），则直接使用
+        if args.remote.startswith('/'):
+            remote_path = args.remote
+        else:
+            remote_path = os.path.join(FTP_PATH, args.remote).replace('\\', '/')
     else:
         remote_path = FTP_PATH
     
@@ -552,6 +582,11 @@ def main():
     if args.get and args.get is not True:
         args.remote = args.get
         args.get = True
+        # 重新处理远程路径，因为args.remote已经改变
+        if args.remote.startswith('/'):
+            remote_path = args.remote
+        else:
+            remote_path = os.path.join(FTP_PATH, args.remote).replace('\\', '/')
     
     ftp_client = FTPClient(args.host, args.user, args.password, args.encoding)
     
@@ -609,21 +644,49 @@ def main():
                 else:
                     local_path = Path(".")
                 
+                # 使用更可靠的方法判断文件/目录类型
+                # 尝试切换到该路径，如果能切换成功说明是目录
                 try:
-                    ftp_client.ftp.size(remote_path)
-                    is_file = True
+                    ftp_client.ftp.cwd(remote_path)
+                    is_file = False  # 能切换到该路径，说明是目录
+                    ftp_client.ftp.cwd('/')  # 切换回根目录
+                    print(f"DEBUG: 路径 {remote_path} 是目录")
                 except:
-                    is_file = False
+                    # 不能切换，可能是文件或不存在的路径
+                    # 尝试获取文件大小来判断是否是文件
+                    try:
+                        ftp_client.ftp.size(remote_path)
+                        is_file = True  # 能获取文件大小，说明是文件
+                        print(f"DEBUG: 路径 {remote_path} 是文件")
+                    except:
+                        # 既不能切换目录也不能获取文件大小，说明路径不存在
+                        print(f"错误: 远程路径不存在: {remote_path}")
+                        success = False
+                        is_file = None  # 标记为无效路径
                 
                 if is_file:
                     if args.local:
-                        local_file = args.local
+                        # 如果本地路径以/结尾，表示要创建目录并下载到该目录
+                        if args.local.endswith('/'):
+                            # 创建目录并下载文件到该目录
+                            os.makedirs(args.local, exist_ok=True)
+                            local_file = os.path.join(args.local, os.path.basename(remote_path))
+                        else:
+                            # 直接使用指定的本地路径（重命名文件）
+                            local_file = args.local
                     else:
                         local_file = os.path.basename(remote_path)
                     success = ftp_client.download_file(remote_path, local_file)
                 else:
                     if args.local:
-                        local_dir = args.local
+                        # 如果本地路径以/结尾，表示要创建目录并下载到该目录
+                        if args.local.endswith('/'):
+                            # 创建目录并下载目录内容到该目录
+                            os.makedirs(args.local, exist_ok=True)
+                            local_dir = os.path.join(args.local, os.path.basename(remote_path))
+                        else:
+                            # 直接使用指定的本地路径（重命名目录）
+                            local_dir = args.local
                     else:
                         local_dir = os.path.basename(remote_path) or "downloaded"
                     success = ftp_client.download_directory(remote_path, local_dir)
