@@ -10,6 +10,7 @@ import sys
 import argparse
 import ftplib
 import time
+import json
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -316,7 +317,7 @@ class FTPClient:
                 self.ftp.cwd(remote_dir)
             except:
                 print(f"远程目录不存在: {remote_dir}")
-                return False
+                return True
             
             print(f"开始下载目录: {remote_dir} -> {local_dir}")
             
@@ -378,20 +379,124 @@ class FTPClient:
             print(f"目录下载失败: {e}")
             return False
 
+    def tree_directory(self, remote_dir: str = '/', max_depth: int = 10, current_depth: int = 0) -> bool:
+        """
+        以树状结构显示FTP服务器目录
+        
+        Args:
+            remote_dir: 远程目录路径
+            max_depth: 最大递归深度
+            current_depth: 当前递归深度
+            
+        Returns:
+            bool: 显示是否成功
+        """
+        try:
+            if current_depth > max_depth:
+                print(f"  {'  ' * current_depth}└── [达到最大深度 {max_depth}]")
+                return True
+            
+            try:
+                self.ftp.cwd(remote_dir)
+            except:
+                print(f"远程目录不存在: {remote_dir}")
+                return True
+            
+            items = []
+            self.ftp.retrlines('LIST', items.append)
+            
+            if not items:
+                print(f"  {'  ' * current_depth}└── (空目录)")
+                return True
+            
+            # 显示当前目录
+            if current_depth == 0:
+                print(f"{remote_dir}/")
+            else:
+                dir_name = os.path.basename(remote_dir.rstrip('/'))
+                print(f"  {'  ' * (current_depth - 1)}├── {dir_name}/")
+            
+            dirs = []
+            files = []
+            
+            for item in items:
+                parts = item.split()
+                if len(parts) < 3:
+                    continue
+                
+                is_dir = parts[0].startswith('d') if parts[0] else False
+                filename = ' '.join(parts[8:]) if len(parts) >= 9 else parts[-1]
+                
+                if filename in ['.', '..']:
+                    continue
+                
+                if is_dir:
+                    dirs.append(filename)
+                else:
+                    files.append(filename)
+            
+            # 先显示文件
+            for i, file in enumerate(sorted(files)):
+                is_last_file = i == len(files) - 1 and not dirs
+                prefix = "  " + ("  " * current_depth) + ("└── " if is_last_file else "├── ")
+                print(f"{prefix}{file}")
+            
+            # 再递归显示目录
+            for i, directory in enumerate(sorted(dirs)):
+                is_last_dir = i == len(dirs) - 1
+                prefix = "  " + ("  " * current_depth) + ("└── " if is_last_dir else "├── ")
+                print(f"{prefix}{directory}/")
+                
+                sub_remote_dir = os.path.join(remote_dir, directory).replace('\\', '/')
+                self.tree_directory(sub_remote_dir, max_depth, current_depth + 1)
+            
+            return True
+            
+        except Exception as e:
+            print(f"显示目录树失败: {e}")
+            import traceback
+            print(f"详细错误: {traceback.format_exc()}")
+            return False
+
+
+def load_config():
+    """
+    从config.json文件加载配置
+    
+    Returns:
+        dict: 配置字典，如果文件不存在则返回None
+    """
+    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+    
+    if not os.path.exists(config_file):
+        return None
+    
+    try:
+        with open(config_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"读取配置文件失败: {e}")
+        return None
+
 
 def main():
     """主函数，处理命令行参数并执行相应操作"""
     
-    FTP_HOST = '192.168.2.250'
-    FTP_USER = '51'
-    FTP_PASS = '51'
-    FTP_PATH = '/文件中转区/恶意程序现网分析/20250828'
-    FTP_ENCODING = 'gbk'
+    # 从配置文件加载配置
+    config = load_config()
+    
+    # 设置默认配置
+    FTP_HOST = config.get('FTP_HOST', '192.168.2.250') if config else '192.168.2.250'
+    FTP_USER = config.get('FTP_USER', '51') if config else '51'
+    FTP_PASS = config.get('FTP_PASS', '51') if config else '51'
+    FTP_PATH = config.get('FTP_PATH', '/文件中转区/研发一部/黄忠雷') if config else '/文件中转区/研发一部/黄忠雷'
+    FTP_ENCODING = config.get('FTP_ENCODING', 'gbk') if config else 'gbk'
     
     parser = argparse.ArgumentParser(description='FTP文件传输工具')
-    parser.add_argument('--put', action='store_true', help='上传文件/目录到FTP服务器')
-    parser.add_argument('--get', action='store_true', help='从FTP服务器下载文件/目录')
+    parser.add_argument('--put', nargs='?', const=True, help='上传文件/目录到FTP服务器，后接本地路径')
+    parser.add_argument('--get', nargs='?', const=True, help='从FTP服务器下载文件/目录，后接远程路径')
     parser.add_argument('--ls', action='store_true', help='列出FTP服务器文件列表')
+    parser.add_argument('--tree', action='store_true', help='以树状结构显示FTP服务器目录')
     parser.add_argument('--local', help='本地文件/目录路径（下载时可省略，默认为当前目录）')
     parser.add_argument('--remote', help='远程文件/目录路径（默认为FTP_PATH）')
     parser.add_argument('--host', default=FTP_HOST, help=f'FTP服务器地址（默认: {FTP_HOST}）')
@@ -401,20 +506,34 @@ def main():
     
     args = parser.parse_args()
     
-    if not (args.put or args.get or args.ls):
-        print("错误: 必须指定 --put、--get 或 --ls 参数")
+    # 检查是否有操作参数
+    has_action = bool(args.put or args.get or args.ls or args.tree)
+    if not has_action:
+        print("错误: 必须指定 --put、--get、--ls 或 --tree 参数")
         parser.print_help()
         sys.exit(1)
     
-    action_count = sum([args.put, args.get, args.ls])
+    # 检查参数冲突
+    action_count = sum([bool(args.put), bool(args.get), bool(args.ls), bool(args.tree)])
     if action_count > 1:
-        print("错误: --put、--get 和 --ls 参数不能同时使用")
+        print("错误: --put、--get、--ls 和 --tree 参数不能同时使用")
         sys.exit(1)
     
+    # 处理远程路径
     if args.remote:
         remote_path = os.path.join(FTP_PATH, args.remote).replace('\\', '/')
     else:
         remote_path = FTP_PATH
+    
+    # 处理新的参数格式：--put 后直接跟本地路径
+    if args.put and args.put is not True:
+        args.local = args.put
+        args.put = True
+    
+    # 处理新的参数格式：--get 后直接跟远程路径
+    if args.get and args.get is not True:
+        args.remote = args.get
+        args.get = True
     
     ftp_client = FTPClient(args.host, args.user, args.password, args.encoding)
     
@@ -424,49 +543,72 @@ def main():
         
         if args.ls:
             success = ftp_client.list_directory(remote_path)
+        elif args.tree:
+            success = ftp_client.tree_directory(remote_path)
         elif args.put:
-            local_path = Path(args.local)
-            if local_path.is_file():
-                if '.' in os.path.basename(remote_path) or remote_path.endswith('/'):
-                    remote_file = remote_path
-                else:
-                    remote_file = os.path.join(remote_path, local_path.name).replace('\\', '/')
-                success = ftp_client.upload_file(args.local, remote_file)
-            elif local_path.is_dir():
-                remote_dir = os.path.join(remote_path, local_path.name).replace('\\', '/')
-                success = ftp_client.upload_directory(args.local, remote_dir)
-            else:
-                print(f"本地路径不存在: {args.local}")
+            if not args.local:
+                print("错误: --put 操作需要指定本地路径")
                 success = False
+            else:
+                local_path = Path(args.local)
+                if local_path.is_file():
+                    # 如果远程路径以/结尾，表示要在该目录下创建文件
+                    if remote_path.endswith('/'):
+                        # 确保目录存在
+                        remote_dir = remote_path.rstrip('/')
+                        if not ftp_client.ensure_remote_directory(remote_dir):
+                            success = False
+                        else:
+                            remote_file = os.path.join(remote_dir, local_path.name).replace('\\', '/')
+                            success = ftp_client.upload_file(args.local, remote_file)
+                    else:
+                        # 直接使用指定的远程路径（重命名文件）
+                        success = ftp_client.upload_file(args.local, remote_path)
+                elif local_path.is_dir():
+                    # 如果远程路径以/结尾，表示要在该目录下创建子目录
+                    if remote_path.endswith('/'):
+                        # 确保父目录存在
+                        remote_parent_dir = remote_path.rstrip('/')
+                        if not ftp_client.ensure_remote_directory(remote_parent_dir):
+                            success = False
+                        else:
+                            remote_dir = os.path.join(remote_parent_dir, local_path.name).replace('\\', '/')
+                            success = ftp_client.upload_directory(args.local, remote_dir)
+                    else:
+                        # 直接使用指定的远程路径（重命名目录）
+                        success = ftp_client.upload_directory(args.local, remote_path)
+                else:
+                    print(f"本地路径不存在: {args.local}")
+                    success = False
         
         else:
             if not args.remote:
-                print("错误: 下载操作必须指定 --remote 参数")
-                sys.exit(1)
-            
-            if args.local:
-                local_path = Path(args.local)
-            else:
-                local_path = Path(".")
-            
-            try:
-                ftp_client.ftp.size(remote_path)
-                is_file = True
-            except:
-                is_file = False
-            
-            if is_file:
-                if args.local:
-                    local_file = args.local
-                else:
-                    local_file = os.path.basename(remote_path)
-                success = ftp_client.download_file(remote_path, local_file)
+                print("错误: 下载操作必须指定远程路径")
+                success = False
             else:
                 if args.local:
-                    local_dir = args.local
+                    local_path = Path(args.local)
                 else:
-                    local_dir = os.path.basename(remote_path) or "downloaded"
-                success = ftp_client.download_directory(remote_path, local_dir)
+                    local_path = Path(".")
+                
+                try:
+                    ftp_client.ftp.size(remote_path)
+                    is_file = True
+                except:
+                    is_file = False
+                
+                if is_file:
+                    if args.local:
+                        local_file = args.local
+                    else:
+                        local_file = os.path.basename(remote_path)
+                    success = ftp_client.download_file(remote_path, local_file)
+                else:
+                    if args.local:
+                        local_dir = args.local
+                    else:
+                        local_dir = os.path.basename(remote_path) or "downloaded"
+                    success = ftp_client.download_directory(remote_path, local_dir)
         
         sys.exit(0 if success else 1)
         

@@ -1,0 +1,7 @@
+{
+  "FTP_HOST": "192.168.2.250",
+  "FTP_USER": "51",
+  "FTP_PASS": "51",
+  "FTP_PATH": "/文件中转区/研发一部/黄忠雷",
+  "FTP_ENCODING": "gbk"
+}
