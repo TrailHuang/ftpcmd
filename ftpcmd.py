@@ -6,16 +6,14 @@ FTP文件传输工具
 """
 
 # 版本号
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 import os
 import sys
 import argparse
 import ftplib
-import time
 import json
 from pathlib import Path
-from typing import Optional, Tuple
 
 
 class FTPClient:
