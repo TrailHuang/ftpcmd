@@ -488,14 +488,14 @@ class FTPClient:
             return False
 
 
-def load_config():
+def load_config(path="config.json"):
     """
     从config.json文件加载配置
     
     Returns:
         dict: 配置字典，如果文件不存在则返回None
     """
-    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
     
     if not os.path.exists(config_file):
         return None
@@ -512,7 +512,7 @@ def main():
     """主函数，处理命令行参数并执行相应操作"""
     
     # 从配置文件加载配置
-    config = load_config()
+    config = load_config("/usr/local/sbin/config.json")
     
     # 设置默认配置
     FTP_HOST = config.get('FTP_HOST', '192.168.2.250') if config else '192.168.2.250'
