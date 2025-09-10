@@ -524,8 +524,8 @@ def main():
     parser = argparse.ArgumentParser(description='FTP文件传输工具')
     parser.add_argument('-p','--put', nargs='?', const=True, help='上传文件/目录到FTP服务器，后接本地路径')
     parser.add_argument('-g','--get', nargs='?', const=True, help='从FTP服务器下载文件/目录，后接远程路径')
-    parser.add_argument('--ls', action='store_true', help='列出FTP服务器文件列表')
-    parser.add_argument('--tree', action='store_true', help='以树状结构显示FTP服务器目录')
+    parser.add_argument('--ls', nargs='?', const=True, help='列出FTP服务器文件列表，后接远程路径')
+    parser.add_argument('--tree', nargs='?', const=True, help='以树状结构显示FTP服务器目录，后接远程路径')
     parser.add_argument('-l', '--local', help='本地文件/目录路径')
     parser.add_argument('-r', '--remote', help='远程文件/目录路径')
     parser.add_argument('--host', default=FTP_HOST, help=f'FTP服务器地址（默认: {FTP_HOST}）')
@@ -582,6 +582,26 @@ def main():
     if args.get and args.get is not True:
         args.remote = args.get
         args.get = True
+        # 重新处理远程路径，因为args.remote已经改变
+        if args.remote.startswith('/'):
+            remote_path = args.remote
+        else:
+            remote_path = os.path.join(FTP_PATH, args.remote).replace('\\', '/')
+    
+    # 处理新的参数格式：--ls 后直接跟远程路径
+    if args.ls and args.ls is not True:
+        args.remote = args.ls
+        args.ls = True
+        # 重新处理远程路径，因为args.remote已经改变
+        if args.remote.startswith('/'):
+            remote_path = args.remote
+        else:
+            remote_path = os.path.join(FTP_PATH, args.remote).replace('\\', '/')
+    
+    # 处理新的参数格式：--tree 后直接跟远程路径
+    if args.tree and args.tree is not True:
+        args.remote = args.tree
+        args.tree = True
         # 重新处理远程路径，因为args.remote已经改变
         if args.remote.startswith('/'):
             remote_path = args.remote
