@@ -18,15 +18,47 @@ import logging
 from pathlib import Path
 
 # 配置日志系统
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('ftpcmd.log', encoding='utf-8'),
-        logging.StreamHandler(sys.stdout)
+def setup_logging():
+    """
+    配置日志系统，优先使用/var/log/目录，如果没有权限则使用用户主目录
+    """
+    log_paths = [
+        '/var/log/ftpcmd.log',  # 系统日志目录
+        os.path.join(os.path.expanduser('~'), '.ftpcmd.log')  # 用户主目录
     ]
-)
-logger = logging.getLogger('ftpcmd')
+    
+    # 尝试找到可写的日志文件路径
+    log_file = None
+    for path in log_paths:
+        try:
+            # 检查目录是否存在且有写入权限
+            dir_path = os.path.dirname(path)
+            if not os.path.exists(dir_path):
+                os.makedirs(dir_path, exist_ok=True)
+            
+            # 测试写入权限
+            with open(path, 'a') as f:
+                f.write('')
+            log_file = path
+            break
+        except (IOError, OSError):
+            continue
+    
+    # 如果所有路径都不可写，使用当前目录
+    if log_file is None:
+        log_file = 'ftpcmd.log'
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    return logging.getLogger('ftpcmd')
+
+logger = setup_logging()
 
 
 class FTPClient:
