@@ -13,7 +13,20 @@ import sys
 import argparse
 import ftplib
 import json
+import getpass
+import logging
 from pathlib import Path
+
+# 配置日志系统
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('ftpcmd.log', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger('ftpcmd')
 
 
 class FTPClient:
@@ -56,10 +69,10 @@ class FTPClient:
             
             self.ftp.login(self.username, self.password)
             self.connected = True
-            print(f"成功连接到FTP服务器: {self.host}")
+            logger.info(f"成功连接到FTP服务器: {self.host}")
             return True
         except Exception as e:
-            print(f"连接FTP服务器失败: {e}")
+            logger.error(f"连接FTP服务器失败: {e}")
             return False
     
     def disconnect(self):
@@ -67,11 +80,15 @@ class FTPClient:
         if self.ftp and self.connected:
             try:
                 self.ftp.quit()
-            except:
-                self.ftp.close()
+            except Exception as e:
+                # 如果quit失败，尝试close
+                try:
+                    self.ftp.close()
+                except Exception as close_error:
+                    logger.error(f"断开FTP连接时发生错误: {close_error}")
             finally:
                 self.connected = False
-                print("已断开FTP连接")
+                logger.info("已断开FTP连接")
     
     def ensure_remote_directory(self, remote_path: str) -> bool:
         """
@@ -90,13 +107,18 @@ class FTPClient:
             for directory in directories:
                 try:
                     self.ftp.cwd(directory)
-                except:
-                    self.ftp.mkd(directory)
-                    self.ftp.cwd(directory)
+                except ftplib.error_perm:
+                    # 目录不存在，尝试创建
+                    try:
+                        self.ftp.mkd(directory)
+                        self.ftp.cwd(directory)
+                    except ftplib.error_perm as e:
+                        logger.error(f"创建目录失败: {directory}, 错误: {e}")
+                        return False
             
             return True
         except Exception as e:
-            print(f"创建远程目录失败: {e}")
+            logger.error(f"创建远程目录失败: {e}")
             return False
     
     def upload_file(self, local_file: str, remote_file: str) -> bool:
@@ -113,22 +135,33 @@ class FTPClient:
         try:
             local_path = Path(local_file)
             if not local_path.is_file():
-                print(f"本地文件不存在: {local_file}")
+                logger.error(f"本地文件不存在: {local_file}")
                 return False
             
            
             file_size = local_path.stat().st_size
             
             
+            # 检查远程文件是否存在，支持断点续传
             remote_size = 0
             try:
                 remote_size = self.ftp.size(remote_file)
-            except:
-                remote_size = 0
+                if remote_size is None:
+                    remote_size = 0
+            except ftplib.error_perm as e:
+                # 550 错误通常表示文件不存在
+                if "550" in str(e):
+                    remote_size = 0
+                else:
+                    logger.error(f"获取远程文件大小失败: {e}")
+                    return False
+            except Exception as e:
+                logger.error(f"检查远程文件失败: {e}")
+                return False
             
             
             if remote_size > 0 and remote_size < file_size:
-                print(f"发现未完成的上传，继续从 {remote_size} 字节处上传")
+                logger.info(f"发现未完成的上传，继续从 {remote_size} 字节处上传")
                 mode = 'ab'
                 start_pos = remote_size
             else:
@@ -145,20 +178,27 @@ class FTPClient:
                 if start_pos > 0:
                     f.seek(start_pos)
                 
+                # 进度更新计数器，每10次更新一次显示
+                update_counter = 0
+                
                 def callback(data):
-                    nonlocal start_pos
+                    nonlocal start_pos, update_counter
                     start_pos += len(data)
-                    progress = (start_pos / file_size) * 100
-                    sys.stdout.write(f"\r上传进度: {progress:.1f}% ({start_pos}/{file_size} bytes)")
-                    sys.stdout.flush()
+                    update_counter += 1
+                    
+                    # 每10次回调更新一次进度显示，减少屏幕刷新频率
+                    if update_counter % 10 == 0:
+                        progress = (start_pos / file_size) * 100
+                        sys.stdout.write(f"\r上传进度: {progress:.1f}% ({start_pos}/{file_size} bytes)")
+                        sys.stdout.flush()
                 
                 self.ftp.storbinary(f"STOR {remote_file}", f, blocksize=8192, callback=callback, rest=start_pos)
             
-            print(f"\n文件上传成功: {local_file} -> {remote_file}")
+            logger.info(f"文件上传成功: {local_file} -> {remote_file}")
             return True
             
         except Exception as e:
-            print(f"\n文件上传失败: {e}")
+            logger.error(f"文件上传失败: {e}")
             return False
     
     def list_directory(self, remote_dir: str = '/') -> bool:
@@ -170,10 +210,10 @@ class FTPClient:
             self.ftp.retrlines('LIST', items.append)
             
             if not items:
-                print(f"目录 '{remote_dir}' 为空")
+                logger.info(f"目录 '{remote_dir}' 为空")
                 return True
             
-            print(f"目录 '{remote_dir}' 的内容:")
+            logger.info(f"目录 '{remote_dir}' 的内容:")
             print("-" * 80)
             
             for item in items:
@@ -199,7 +239,7 @@ class FTPClient:
             return True
             
         except Exception as e:
-            print(f"列出目录失败: {e}")
+            logger.error(f"列出目录失败: {e}")
             return False
 
     def download_file(self, remote_file: str, local_file: str) -> bool:
@@ -208,10 +248,15 @@ class FTPClient:
             try:
                 remote_size = self.ftp.size(remote_file)
                 if remote_size is None:
-                    print(f"远程文件不存在: {remote_file}")
+                    logger.error(f"远程文件不存在: {remote_file}")
                     return False
-            except:
-                print(f"远程文件不存在: {remote_file}")
+            except ftplib.error_perm:
+                # FTP权限错误，文件可能不存在或没有权限
+                logger.error(f"远程文件不存在或没有权限: {remote_file}")
+                return False
+            except Exception as e:
+                # 其他异常情况
+                logger.error(f"检查远程文件失败: {e}")
                 return False
             
             local_path = Path(local_file)
@@ -221,14 +266,14 @@ class FTPClient:
                 if local_path.is_file():
                     local_size = local_path.stat().st_size
                     if local_size == remote_size:
-                        print(f"文件已存在且完整: {local_file}")
+                        logger.info(f"文件已存在且完整: {local_file}")
                         return True
                     elif local_size < remote_size:
-                        print(f"发现未完成的下载，继续从 {local_size} 字节处下载")
+                        logger.info(f"发现未完成的下载，继续从 {local_size} 字节处下载")
                         mode = 'ab'
                         start_pos = local_size
                     else:
-                        print(f"本地文件异常，重新下载")
+                        logger.warning(f"本地文件异常，重新下载")
                         mode = 'wb'
                         start_pos = 0
                 else:
@@ -238,14 +283,14 @@ class FTPClient:
                     if local_path.exists() and local_path.is_file():
                         local_size = local_path.stat().st_size
                         if local_size == remote_size:
-                            print(f"文件已存在且完整: {local_file}")
+                            logger.info(f"文件已存在且完整: {local_file}")
                             return True
                         elif local_size < remote_size:
-                            print(f"发现未完成的下载，继续从 {local_size} 字节处下载")
+                            logger.info(f"发现未完成的下载，继续从 {local_size} 字节处下载")
                             mode = 'ab'
                             start_pos = local_size
                         else:
-                            print(f"本地文件异常，重新下载")
+                            logger.warning(f"本地文件异常，重新下载")
                             mode = 'wb'
                             start_pos = 0
                     else:
@@ -258,22 +303,29 @@ class FTPClient:
             local_path.parent.mkdir(parents=True, exist_ok=True)
             
             with open(local_file, mode) as f:
+                # 进度更新计数器，每10次更新一次显示
+                update_counter = 0
+                
                 def callback(data):
                     """下载进度回调函数"""
-                    nonlocal start_pos
+                    nonlocal start_pos, update_counter
                     f.write(data)
                     start_pos += len(data)
-                    progress = (start_pos / remote_size) * 100
-                    sys.stdout.write(f"\r下载进度: {progress:.1f}% ({start_pos}/{remote_size} bytes)")
-                    sys.stdout.flush()
+                    update_counter += 1
+                    
+                    # 每10次回调更新一次进度显示，减少屏幕刷新频率
+                    if update_counter % 10 == 0:
+                        progress = (start_pos / remote_size) * 100
+                        sys.stdout.write(f"\r下载进度: {progress:.1f}% ({start_pos}/{remote_size} bytes)")
+                        sys.stdout.flush()
                 
                 self.ftp.retrbinary(f"RETR {remote_file}", callback, blocksize=8192, rest=start_pos)
             
-            print(f"\n文件下载成功: {remote_file} -> {local_file}")
+            logger.info(f"文件下载成功: {remote_file} -> {local_file}")
             return True
             
         except Exception as e:
-            print(f"\n文件下载失败: {e}")
+            logger.error(f"文件下载失败: {e}")
             return False
     
     def upload_directory(self, local_dir: str, remote_dir: str) -> bool:
@@ -290,13 +342,13 @@ class FTPClient:
         try:
             local_path = Path(local_dir)
             if not local_path.is_dir():
-                print(f"本地目录不存在: {local_dir}")
+                logger.error(f"本地目录不存在: {local_dir}")
                 return False
             
             if not self.ensure_remote_directory(remote_dir):
                 return False
             
-            print(f"开始上传目录: {local_dir} -> {remote_dir}")
+            logger.info(f"开始上传目录: {local_dir} -> {remote_dir}")
             
             success_count = 0
             total_count = 0
@@ -315,16 +367,16 @@ class FTPClient:
                     remote_file = os.path.join(current_remote_dir, file).replace('\\', '/')
                     
                     total_count += 1
-                    print(f"\n[{total_count}] 上传文件: {file}")
+                    logger.info(f"[{total_count}] 上传文件: {file}")
                     
                     if self.upload_file(local_file, remote_file):
                         success_count += 1
             
-            print(f"\n目录上传完成: {success_count}/{total_count} 个文件成功")
+            logger.info(f"目录上传完成: {success_count}/{total_count} 个文件成功")
             return success_count == total_count
             
         except Exception as e:
-            print(f"目录上传失败: {e}")
+            logger.error(f"目录上传失败: {e}")
             return False
     
     def download_directory(self, remote_dir: str, local_dir: str, max_depth: int = 50) -> bool:
@@ -342,11 +394,16 @@ class FTPClient:
         try:
             try:
                 self.ftp.cwd(remote_dir)
-            except:
-                print(f"远程目录不存在: {remote_dir}")
+            except ftplib.error_perm:
+                # 远程目录不存在或没有权限
+                logger.error(f"远程目录不存在: {remote_dir}")
                 return True
+            except Exception as e:
+                # 其他连接错误
+                logger.error(f"访问远程目录失败: {e}")
+                return False
             
-            print(f"开始下载目录: {remote_dir} -> {local_dir}")
+            logger.info(f"开始下载目录: {remote_dir} -> {local_dir}")
             
             success_count = 0
             total_count = 0
@@ -355,7 +412,7 @@ class FTPClient:
                 nonlocal success_count, total_count
                 
                 if depth > max_depth:
-                    print(f"警告: 达到最大递归深度 {max_depth}，停止下载")
+                    logger.warning(f"警告: 达到最大递归深度 {max_depth}，停止下载")
                     return
                 
                 Path(current_local_dir).mkdir(parents=True, exist_ok=True)
@@ -365,8 +422,6 @@ class FTPClient:
                     
                     items = []
                     self.ftp.retrlines('LIST', items.append)
-                    
-
                     
                     for item in items:
                         parts = item.split()
@@ -393,17 +448,17 @@ class FTPClient:
                                 success_count += 1
                 
                 except Exception as e:
-                    print(f"获取目录列表失败: {e}")
+                    logger.error(f"获取目录列表失败: {e}")
                     import traceback
-                    print(f"详细错误: {traceback.format_exc()}")
+                    logger.error(f"详细错误: {traceback.format_exc()}")
             
             download_recursive(remote_dir, local_dir, 0)
             
-            print(f"\n目录下载完成: {success_count}/{total_count} 个文件成功")
+            logger.info(f"目录下载完成: {success_count}/{total_count} 个文件成功")
             return success_count == total_count
             
         except Exception as e:
-            print(f"目录下载失败: {e}")
+            logger.error(f"目录下载失败: {e}")
             return False
 
     def tree_directory(self, remote_dir: str = '/', max_depth: int = 10, current_depth: int = 0) -> bool:
@@ -425,9 +480,14 @@ class FTPClient:
             
             try:
                 self.ftp.cwd(remote_dir)
-            except:
-                print(f"远程目录不存在: {remote_dir}")
+            except ftplib.error_perm:
+                # 远程目录不存在或没有权限
+                logger.error(f"远程目录不存在: {remote_dir}")
                 return True
+            except Exception as e:
+                # 其他连接错误
+                logger.error(f"访问远程目录失败: {e}")
+                return False
             
             items = []
             self.ftp.retrlines('LIST', items.append)
@@ -480,9 +540,9 @@ class FTPClient:
             return True
             
         except Exception as e:
-            print(f"显示目录树失败: {e}")
+            logger.error(f"显示目录树失败: {e}")
             import traceback
-            print(f"详细错误: {traceback.format_exc()}")
+            logger.error(f"详细错误: {traceback.format_exc()}")
             return False
 
 
@@ -502,7 +562,7 @@ def load_config(path="config.json"):
         with open(config_file, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        print(f"读取配置文件失败: {e}")
+        logger.error(f"读取配置文件失败: {e}")
         return None
 
 
@@ -528,37 +588,45 @@ def main():
     parser.add_argument('-r', '--remote', help='远程文件/目录路径')
     parser.add_argument('--host', default=FTP_HOST, help=f'FTP服务器地址（默认: {FTP_HOST}）')
     parser.add_argument('--user', default=FTP_USER, help=f'FTP用户名（默认: {FTP_USER}）')
-    parser.add_argument('--pass', dest='password', default=FTP_PASS, help=f'FTP密码（默认: {FTP_PASS}）')
+    parser.add_argument('--pass', dest='password', default=FTP_PASS, help=f'FTP密码（默认: {FTP_PASS}，使用--pass ""来交互式输入密码）')
     parser.add_argument('--encoding', default=FTP_ENCODING, help=f'FTP连接编码（默认: {FTP_ENCODING}）')
     parser.add_argument('-v', '--version', action='store_true', help='显示版本信息')
     
     args = parser.parse_args()
     
+    # 处理密码输入
+    if args.password == "":
+        # 交互式输入密码
+        args.password = getpass.getpass("请输入FTP密码: ")
+    elif args.password == FTP_PASS and not config:
+        # 使用默认密码但配置文件不存在，提示用户
+        logger.warning(f"警告: 使用默认密码 '{FTP_PASS}'，建议通过配置文件或命令行参数设置安全密码")
+    
     # 处理版本显示
     if args.version:
-        print(f"FTP文件传输工具 v{VERSION}")
+        logger.info(f"FTP文件传输工具 v{VERSION}")
         sys.exit(0)
     
     # 检查是否有操作参数
     has_action = bool(args.put or args.get or args.ls or args.tree)
     if not has_action:
-        print("错误: 必须指定 --put、--get、--ls、--tree 或 --version 参数")
+        logger.error("错误: 必须指定 --put、--get、--ls、--tree 或 --version 参数")
         parser.print_help()
         sys.exit(1)
     
     # 检查参数冲突
     action_count = sum([bool(args.put), bool(args.get), bool(args.ls), bool(args.tree)])
     if action_count > 1:
-        print("错误: --put、--get、--ls 和 --tree 参数不能同时使用")
+        logger.error("错误: --put、--get、--ls 和 --tree 参数不能同时使用")
         sys.exit(1)
     
     # 检查参数组合冲突
     if args.put and args.local:
-        print("错误: --put 命令不需要使用 --local 参数")
+        logger.error("错误: --put 命令不需要使用 --local 参数")
         sys.exit(1)
     
     if args.get and args.remote:
-        print("错误: --get 命令不需要使用 --remote 参数")
+        logger.error("错误: --get 命令不需要使用 --remote 参数")
         sys.exit(1)
     
     # 处理远程路径
@@ -618,7 +686,7 @@ def main():
             success = ftp_client.tree_directory(remote_path)
         elif args.put:
             if not args.local:
-                print("错误: --put 操作需要指定本地路径")
+                logger.error("错误: --put 操作需要指定本地路径")
                 success = False
             else:
                 local_path = Path(args.local)
@@ -654,12 +722,12 @@ def main():
                         # 直接使用指定的远程路径（重命名目录）
                         success = ftp_client.upload_directory(args.local, remote_path)
                 else:
-                    print(f"本地路径不存在: {args.local}")
+                    logger.error(f"本地路径不存在: {args.local}")
                     success = False
         
         else:
             if not args.remote:
-                print("错误: 下载操作必须指定远程路径")
+                logger.error("错误: 下载操作必须指定远程路径")
                 success = False
             else:
                 if args.local:
@@ -673,17 +741,15 @@ def main():
                     ftp_client.ftp.cwd(remote_path)
                     is_file = False  # 能切换到该路径，说明是目录
                     ftp_client.ftp.cwd('/')  # 切换回根目录
-                    print(f"DEBUG: 路径 {remote_path} 是目录")
                 except:
                     # 不能切换，可能是文件或不存在的路径
                     # 尝试获取文件大小来判断是否是文件
                     try:
                         ftp_client.ftp.size(remote_path)
                         is_file = True  # 能获取文件大小，说明是文件
-                        print(f"DEBUG: 路径 {remote_path} 是文件")
                     except:
                         # 既不能切换目录也不能获取文件大小，说明路径不存在
-                        print(f"错误: 远程路径不存在: {remote_path}")
+                        logger.error(f"错误: 远程路径不存在: {remote_path}")
                         success = False
                         is_file = None  # 标记为无效路径
                 
