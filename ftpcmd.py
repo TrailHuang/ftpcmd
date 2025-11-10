@@ -6,7 +6,7 @@ FTP文件传输工具
 """
 
 # 版本号
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 import os
 import sys
@@ -567,7 +567,85 @@ class FTPClient:
                 print(f"{prefix}{directory}/")
                 
                 sub_remote_dir = os.path.join(remote_dir, directory).replace('\\', '/')
-                self.tree_directory(sub_remote_dir, max_depth, current_depth + 1)
+                # 递归调用时不显示目录名，避免重复显示
+                self._tree_directory_internal(sub_remote_dir, max_depth, current_depth + 1)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"显示目录树失败: {e}")
+            import traceback
+            logger.error(f"详细错误: {traceback.format_exc()}")
+            return False
+
+    def _tree_directory_internal(self, remote_dir: str, max_depth: int, current_depth: int) -> bool:
+        """
+        内部方法：以树状结构显示FTP服务器目录（不显示当前目录名）
+        
+        Args:
+            remote_dir: 远程目录路径
+            max_depth: 最大递归深度
+            current_depth: 当前递归深度
+            
+        Returns:
+            bool: 显示是否成功
+        """
+        try:
+            if current_depth > max_depth:
+                print(f"  {'  ' * current_depth}└── [达到最大深度 {max_depth}]")
+                return True
+            
+            try:
+                self.ftp.cwd(remote_dir)
+            except ftplib.error_perm:
+                # 远程目录不存在或没有权限
+                logger.error(f"远程目录不存在: {remote_dir}")
+                return True
+            except Exception as e:
+                # 其他连接错误
+                logger.error(f"访问远程目录失败: {e}")
+                return False
+            
+            items = []
+            self.ftp.retrlines('LIST', items.append)
+            
+            if not items:
+                print(f"  {'  ' * current_depth}└── (空目录)")
+                return True
+            
+            dirs = []
+            files = []
+            
+            for item in items:
+                parts = item.split()
+                if len(parts) < 3:
+                    continue
+                
+                is_dir = parts[0].startswith('d') if parts[0] else False
+                filename = ' '.join(parts[8:]) if len(parts) >= 9 else parts[-1]
+                
+                if filename in ['.', '..']:
+                    continue
+                
+                if is_dir:
+                    dirs.append(filename)
+                else:
+                    files.append(filename)
+            
+            # 先显示文件
+            for i, file in enumerate(sorted(files)):
+                is_last_file = i == len(files) - 1 and not dirs
+                prefix = "  " + ("  " * current_depth) + ("└── " if is_last_file else "├── ")
+                print(f"{prefix}{file}")
+            
+            # 再递归显示目录
+            for i, directory in enumerate(sorted(dirs)):
+                is_last_dir = i == len(dirs) - 1
+                prefix = "  " + ("  " * current_depth) + ("└── " if is_last_dir else "├── ")
+                print(f"{prefix}{directory}/")
+                
+                sub_remote_dir = os.path.join(remote_dir, directory).replace('\\', '/')
+                self._tree_directory_internal(sub_remote_dir, max_depth, current_depth + 1)
             
             return True
             
